@@ -282,8 +282,8 @@ int main(int argc, char* argv[]) {
         uint16_t fc = *((uint16_t*)(packet + rt_len));
         uint8_t subtype = (fc >> 4) & 0x0F;
         uint8_t type = (fc >> 2) & 0x03;
-        // if (type != 0 || subtype != 8)
-        //     continue;
+        if (type != 0 || subtype != 8)
+            continue;
 
         // beacon frame인 경우에만 처리 (CSA IE 삽입 후 전송)
         processBroadcast(argv[1], packet, header->caplen, 0x0b, 0x03);
