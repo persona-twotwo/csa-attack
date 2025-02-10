@@ -191,13 +191,13 @@ void sendPacket(const std::string& dev, const std::vector<uint8_t>& packet) {
         return;
     }
     std::cout << "packet size: " << int(packet.size()) << std::endl;
-    for (size_t i = 0; i < packet.size(); i++) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)packet[i] << " ";
-        if ((i + 1) % 16 == 0)
-            std::cout << std::endl;
-    }
-    std::cout << "\n=========================\n";
-    std::cout << std::dec;
+    // for (size_t i = 0; i < packet.size(); i++) {
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)packet[i] << " ";
+    //     if ((i + 1) % 16 == 0)
+    //         std::cout << std::endl;
+    // }
+    // std::cout << "\n=========================\n";
+    // std::cout << std::dec;
     if (pcap_sendpacket(handle, packet.data(), packet.size()) != 0) {
         std::cerr << "패킷 전송 오류: " << pcap_geterr(handle) << std::endl;
     } else {
@@ -210,11 +210,11 @@ void sendPacket(const std::string& dev, const std::vector<uint8_t>& packet) {
 void processBroadcast(const std::string& dev, const uint8_t* rawPacket, size_t len, uint8_t newChannel, uint8_t switchCount) {
     std::cout << "========================================" << std::endl;
     std::cout << "패킷 수신 (Broadcast): " << len << "바이트" << std::endl;
-    for (size_t i = 0; i < len; i++) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
-        if ((i + 1) % 16 == 0)
-            std::cout << std::endl;
-    }
+    // for (size_t i = 0; i < len; i++) {
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
+    //     if ((i + 1) % 16 == 0)
+    //         std::cout << std::endl;
+    // }
     std::cout << std::dec << std::endl;
     
     // Radiotap 헤더 파싱 및 실제 프레임 시작 오프셋 계산
@@ -243,12 +243,12 @@ void processUnicast(const std::string& dev, const uint8_t* rawPacket, size_t len
                     uint8_t newChannel, uint8_t switchCount, const std::string &stationMAC) {
     std::cout << "========================================" << std::endl;
     std::cout << "패킷 수신 (Unicast): " << len << "바이트" << std::endl;
-    for (size_t i = 0; i < len; i++) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
-        if ((i + 1) % 16 == 0)
-            std::cout << std::endl;
-    }
-    std::cout << std::dec << std::endl;
+    // for (size_t i = 0; i < len; i++) {
+    //     std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)rawPacket[i] << " ";
+    //     if ((i + 1) % 16 == 0)
+    //         std::cout << std::endl;
+    // }
+    // std::cout << std::dec << std::endl;
     
     // Radiotap 헤더 파싱 및 실제 프레임 시작 오프셋 계산
     RadiotapHeader rtHeader(rawPacket);
